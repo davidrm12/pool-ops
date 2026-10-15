@@ -37,3 +37,25 @@ export async function syncLines(table, parentKey, parentId, lines, toRow) {
     else await q(supabase.from(table).insert({ ...toRow(l), [parentKey]: parentId }))
   }
 }
+
+// Sends a report email now (route | reorder | weekly) through the `reports` Edge Function.
+export async function sendReport(kind, extra = {}) {
+  const { data, error } = await supabase.functions.invoke('reports', { body: { kind, ...extra } })
+  if (error) {
+    let b = null
+    try { b = await error.context.json() } catch { /* not JSON */ }
+    if (b?.results) return b                       // partial: some recipients failed
+    throw new Error(b?.error || error.message)
+  }
+  return data
+}
+
+export const nextDeliveryOn = async (from) => q(supabase.rpc('next_delivery_on', from ? { p_from: from } : {}))
+
+// One-line Spanish summary of a send result.
+export const describeSend = (r) => {
+  if (r?.skipped) return 'No había nada que enviar.'
+  const ok = (r?.results || []).filter((x) => x.ok).map((x) => x.email)
+  const bad = (r?.results || []).filter((x) => !x.ok)
+  return [ok.length ? `Enviado a ${ok.join(', ')}.` : '', bad.length ? `No se pudo enviar a ${bad.map((x) => x.email).join(', ')}.` : ''].filter(Boolean).join(' ')
+}

@@ -14,6 +14,7 @@ import Expenses from './pages/Expenses'
 import Subscriptions from './pages/Subscriptions'
 import Finance from './pages/Finance'
 import More from './pages/More'
+import Automations from './pages/Automations'
 
 const NAV = [
   { to: '/', label: 'Resumen', icon: 'dash', end: true },
@@ -26,6 +27,7 @@ const NAV = [
   { to: '/compras', label: 'Compras', icon: 'cart' },
   { to: '/gastos', label: 'Gastos', icon: 'cash' },
   { to: '/finanzas', label: 'Finanzas', icon: 'chart' },
+  { to: '/automatizaciones', label: 'Automatizaciones', icon: 'gear' },
 ]
 const MOBILE = ['/', '/entregas', '/pedidos', '/directorio']
 
@@ -98,6 +100,7 @@ export default function App() {
               <Route path="/compras" element={<Purchases />} />
               <Route path="/gastos" element={<Expenses />} />
               <Route path="/finanzas" element={<Finance />} />
+              <Route path="/automatizaciones" element={<Automations />} />
               <Route path="/mas" element={<More nav={NAV.filter((n) => !MOBILE.includes(n.to))} email={session.user.email} />} />
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>

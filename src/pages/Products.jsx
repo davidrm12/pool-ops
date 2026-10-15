@@ -11,10 +11,10 @@ export default function Products() {
   const { data, error, loading, reload } = useLoad(async () => {
     const [products, stock] = await Promise.all([
       q(supabase.from('products').select('*, product_variants(*), supplier:suppliers(name)').order('name')),
-      q(supabase.from('v_stock').select('product_id, on_hand')),
+      q(supabase.from('v_stock').select('product_id, on_hand, needs_reorder')),
     ])
-    const s = Object.fromEntries(stock.map((x) => [x.product_id, x.on_hand]))
-    return products.map((p) => ({ ...p, on_hand: s[p.id] ?? 0, product_variants: p.product_variants.sort((a, b) => a.pack_qty - b.pack_qty) }))
+    const s = Object.fromEntries(stock.map((x) => [x.product_id, x]))
+    return products.map((p) => ({ ...p, on_hand: s[p.id]?.on_hand ?? 0, low: s[p.id]?.needs_reorder, product_variants: p.product_variants.sort((a, b) => a.pack_qty - b.pack_qty) }))
   })
   const rows = (data || []).filter((p) => view === 'all' || (view === 'active' ? p.active : !p.active))
 
@@ -45,7 +45,7 @@ export default function Products() {
                         })}
                     </td>
                     <td className="num">{p.unit_cost != null ? `${money(p.unit_cost)}/${p.base_unit}` : <Badge cls="b-warn">Sin costo</Badge>}</td>
-                    <td className="num" style={{ color: p.reorder_point != null && p.on_hand <= p.reorder_point ? 'var(--danger)' : undefined }}>{qty(p.on_hand)} {p.base_unit}</td>
+                    <td className="num" style={{ color: p.low ? 'var(--danger)' : undefined }}>{qty(p.on_hand)} {p.base_unit}</td>
                     <td className="hide-sm">{p.supplier?.name || <span className="muted">—</span>}</td>
                   </tr>
                 ))}
@@ -59,12 +59,12 @@ export default function Products() {
   )
 }
 
-const blank = { name: '', category: 'cloro', base_unit: 'kg', unit_cost: '', reorder_point: '', reorder_qty: '', supplier_id: '', description: '', active: true }
+const blank = { name: '', category: 'cloro', base_unit: 'kg', unit_cost: '', reorder_qty: '', supplier_id: '', description: '', active: true }
 
 function ProductForm({ product, onClose, onSaved }) {
   const [f, setF] = useState(() => {
     const p = { ...blank, ...(product || {}) }
-    for (const k of ['unit_cost', 'reorder_point', 'reorder_qty', 'supplier_id', 'description']) p[k] = p[k] ?? ''
+    for (const k of ['unit_cost', 'reorder_qty', 'supplier_id', 'description']) p[k] = p[k] ?? ''
     return p
   })
   const [variants, setVariants] = useState(product?.product_variants?.map((v) => ({ ...v })) || [{ key: 1, label: '', pack_qty: 1, price: '', active: true }])
@@ -82,7 +82,7 @@ function ProductForm({ product, onClose, onSaved }) {
     const vs = variants.filter((v) => v.label.trim() || v.price !== '')
     if (vs.some((v) => !v.label.trim() || v.price === '' || !(Number(v.pack_qty) > 0))) { setErr('Cada presentación necesita nombre, contenido mayor a 0 y precio.'); return }
     setBusy(true); setErr(null)
-    const row = { name: f.name.trim(), category: f.category, base_unit: f.base_unit, unit_cost: num(f.unit_cost), reorder_point: num(f.reorder_point), reorder_qty: num(f.reorder_qty), supplier_id: num(f.supplier_id), description: f.description.trim() || null, active: f.active }
+    const row = { name: f.name.trim(), category: f.category, base_unit: f.base_unit, unit_cost: num(f.unit_cost), reorder_qty: num(f.reorder_qty), supplier_id: num(f.supplier_id), description: f.description.trim() || null, active: f.active }
     try {
       let id = product?.id
       if (id) await q(supabase.from('products').update(row).eq('id', id))
@@ -109,6 +109,7 @@ function ProductForm({ product, onClose, onSaved }) {
   }
 
   const cost = num(f.unit_cost)
+  const largest = Math.max(0, ...variants.filter((v) => v.active !== false && Number(v.pack_qty) > 0).map((v) => Number(v.pack_qty))) || null
   return (
     <Modal wide title={product ? product.name : 'Nuevo producto'} onClose={onClose}
       footer={<><div>{product && <DeleteButton onConfirm={remove} />}</div><div className="actions"><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={save} disabled={busy}>Guardar producto</button></div></>}>
@@ -118,8 +119,8 @@ function ProductForm({ product, onClose, onSaved }) {
         <Field label="Unidad de inventario" hint="El inventario y el costo se llevan en esta unidad"><Select value={f.base_unit} onChange={set('base_unit')} options={options(L.unit)} /></Field>
         <Field label={`Costo por ${f.base_unit}`} hint="Se actualiza solo con cada compra (costo promedio)"><input type="number" min="0" step="any" inputMode="decimal" value={f.unit_cost} onChange={set('unit_cost')} /></Field>
         <Field label="Proveedor habitual"><Select value={f.supplier_id} onChange={set('supplier_id')} placeholder="—" options={suppliers.map((s) => ({ value: s.id, label: s.name }))} /></Field>
-        <Field label={`Punto de reorden (${f.base_unit})`} hint="Avisa cuando la existencia baje de aquí"><input type="number" min="0" step="any" inputMode="decimal" value={f.reorder_point} onChange={set('reorder_point')} /></Field>
-        <Field label={`Cantidad a pedir (${f.base_unit})`}><input type="number" min="0" step="any" inputMode="decimal" value={f.reorder_qty} onChange={set('reorder_qty')} /></Field>
+        <Field label={`Cantidad a comprar al reabastecer (${f.base_unit})`} hint="Opcional. Vacío = se sugiere con base en las ventas del último mes"><input type="number" min="0" step="any" inputMode="decimal" value={f.reorder_qty} onChange={set('reorder_qty')} /></Field>
+        <div className="field" style={{ alignSelf: 'end' }}><small>La alerta de reabastecimiento sale cuando lo que queda (descontando las suscripciones próximas) alcanza solo para la presentación más grande{largest ? `: ${largest} ${f.base_unit}` : ''}.</small></div>
         <Field label="Descripción / modo de uso" className="full"><textarea value={f.description} onChange={set('description')} /></Field>
         <label className="check"><input type="checkbox" checked={f.active} onChange={set('active')} />Activo (aparece al registrar pedidos)</label>
       </div>

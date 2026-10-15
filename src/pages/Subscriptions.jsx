@@ -10,10 +10,19 @@ export default function Subscriptions() {
   const [view, setView] = useState('active')
   const [editing, setEditing] = useState(null)
   const toast = useToast()
-  const { data, error, loading, reload } = useLoad(() => q(supabase.from('v_subscriptions').select('*').order('next_delivery_date')))
+  const { data: all, error, loading, reload } = useLoad(async () => {
+    const [subs, st] = await Promise.all([
+      q(supabase.from('v_subscriptions').select('*').order('next_delivery_date')),
+      q(supabase.from('settings').select('lead_days').single()),
+    ])
+    return { subs, lead: st.lead_days }
+  })
+  const data = all?.subs
   const rows = (data || []).filter((s) => view === 'all' || s.status === view)
   const active = (data || []).filter((s) => s.status === 'active')
-  const due = active.filter((s) => parseDate(s.next_delivery_date) <= parseDate(today()))
+  // Same rule as the daily job: due when the delivery is within the lead time.
+  const horizon = parseDate(today()); horizon.setDate(horizon.getDate() + (all?.lead ?? 0))
+  const due = active.filter((s) => parseDate(s.next_delivery_date) <= horizon)
   const mrr = active.reduce((s, x) => s + Number(x.monthly_value), 0)
 
   const generate = async () => {
@@ -29,7 +38,7 @@ export default function Subscriptions() {
       <div className="page-head">
         <div><h1>Suscripciones</h1><p>{active.length} activas, {money(mrr)} al mes en ventas recurrentes.</p></div>
         <div className="actions">
-          <button className="btn" onClick={generate} disabled={!due.length}>{due.length ? `Crear ${due.length} pedido${due.length > 1 ? 's' : ''} de hoy` : 'Nada que crear hoy'}</button>
+          <button className="btn" onClick={generate} disabled={!due.length}>{due.length ? `Crear ${due.length} pedido${due.length > 1 ? 's' : ''} ahora` : 'Nada que crear ahora'}</button>
           <button className="btn primary" onClick={() => setEditing({})}><Icon name="plus" />Nueva suscripción</button>
         </div>
       </div>
@@ -44,7 +53,7 @@ export default function Subscriptions() {
                 <tr key={s.id} className="click" onClick={() => setEditing(s)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setEditing(s)}>
                   <td><b>{s.customer_name}</b><div className="sub">{phoneFmt(s.customer_phone)}</div></td>
                   <td>{s.items_summary || <span className="muted">Sin productos</span>}</td>
-                  <td>Cada {s.frequency_days} días<div className="sub">{L.payMethod[s.payment_method]}</div></td>
+                  <td>{s.frequency_weeks === 1 ? 'Cada semana' : `Cada ${s.frequency_weeks} semanas`}<div className="sub">{L.payMethod[s.payment_method]}</div></td>
                   <td>{s.status === 'active' ? relDay(s.next_delivery_date) : '—'}</td>
                   <td className="num">{money(s.value_per_delivery)}</td>
                   <td className="num hide-sm">{money(s.monthly_value)}</td>
@@ -55,14 +64,14 @@ export default function Subscriptions() {
           </div>
         )}
       </div>
-      <p className="muted" style={{ marginTop: 12, fontSize: 13.5 }}>Los pedidos de suscripción se crean al presionar el botón de arriba. Más adelante se crearán solos cada mañana.</p>
+      <p className="muted" style={{ marginTop: 12, fontSize: 13.5 }}>Los pedidos de suscripción se crean solos cada mañana, unos días antes de la entrega (ver Automatizaciones). El botón de arriba los crea en el momento si hace falta.</p>
       {editing && <SubForm sub={editing.id ? editing : null} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload() }} />}
     </>
   )
 }
 
 function SubForm({ sub, onClose, onSaved }) {
-  const [f, setF] = useState({ customer_id: sub?.customer_id ?? '', frequency_days: sub?.frequency_days ?? 30, next_delivery_date: sub?.next_delivery_date ?? today(), payment_method: sub?.payment_method ?? 'cash', status: sub?.status ?? 'active', delivery_address: sub?.delivery_address ?? '', notes: sub?.notes ?? '' })
+  const [f, setF] = useState({ customer_id: sub?.customer_id ?? '', frequency_weeks: sub?.frequency_weeks ?? 4, next_delivery_date: sub?.next_delivery_date ?? today(), payment_method: sub?.payment_method ?? 'cash', status: sub?.status ?? 'active', delivery_address: sub?.delivery_address ?? '', notes: sub?.notes ?? '' })
   const [lines, setLines] = useState([])
   const [customers, setCustomers] = useState([])
   const [variants, setVariants] = useState([])
@@ -82,7 +91,7 @@ function SubForm({ sub, onClose, onSaved }) {
     if (!good.length) { setErr('Agrega al menos un producto.'); return }
     if (new Set(good.map((l) => String(l.variant_id))).size !== good.length) { setErr('Hay un producto repetido; junta las cantidades en un solo renglón.'); return }
     setBusy(true); setErr(null)
-    const row = { customer_id: Number(f.customer_id), frequency_days: Number(f.frequency_days), next_delivery_date: f.next_delivery_date, payment_method: f.payment_method, status: f.status, delivery_address: f.delivery_address.trim() || null, notes: f.notes.trim() || null, cancelled_on: f.status === 'cancelled' ? (sub?.cancelled_on || today()) : null }
+    const row = { customer_id: Number(f.customer_id), frequency_weeks: Number(f.frequency_weeks), next_delivery_date: f.next_delivery_date, payment_method: f.payment_method, status: f.status, delivery_address: f.delivery_address.trim() || null, notes: f.notes.trim() || null, cancelled_on: f.status === 'cancelled' ? (sub?.cancelled_on || today()) : null }
     try {
       let id = sub?.id
       if (id) await q(supabase.from('subscriptions').update(row).eq('id', id))
@@ -106,8 +115,8 @@ function SubForm({ sub, onClose, onSaved }) {
       <LinesEditor lines={lines} setLines={setLines} variants={variants} showPrice={false} />
       <p className="muted" style={{ fontSize: 13.5 }}>Cada pedido usa el precio vigente del catálogo. Hoy serían {money(perDelivery)} por entrega.</p>
       <div className="form-grid">
-        <Field label="Cada cuántos días"><input type="number" min="7" max="180" value={f.frequency_days} onChange={set('frequency_days')} /></Field>
-        <Field label="Siguiente entrega"><input type="date" value={f.next_delivery_date} onChange={set('next_delivery_date')} /></Field>
+        <Field label="Frecuencia"><Select value={String(f.frequency_weeks)} onChange={set('frequency_weeks')} options={[1, 2, 3, 4, 5, 6, 8, 10, 12].map((w) => ({ value: String(w), label: w === 1 ? 'Cada semana' : `Cada ${w} semanas` }))} /></Field>
+        <Field label="Siguiente entrega" hint="Se ajusta al siguiente día de reparto"><input type="date" value={f.next_delivery_date} onChange={set('next_delivery_date')} /></Field>
         <Field label="Forma de pago"><Select value={f.payment_method} onChange={set('payment_method')} options={options(L.payMethod)} /></Field>
         <Field label="Estado"><Select value={f.status} onChange={set('status')} options={options(L.subStatus)} /></Field>
         <Field label="Dirección de entrega" className="full" hint="Vacía = dirección del cliente"><input value={f.delivery_address} onChange={set('delivery_address')} /></Field>

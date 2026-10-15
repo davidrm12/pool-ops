@@ -54,10 +54,10 @@ export default function Purchases() {
           {suppliers.loading ? <Loading /> : !suppliers.data?.length ? <Empty text="Sin proveedores todavía." /> : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Proveedor</th><th>Contacto</th><th>Teléfono</th><th className="hide-sm">Notas</th></tr></thead>
+                <thead><tr><th>Proveedor</th><th>Tienda en línea</th><th>Teléfono</th><th className="hide-sm">Notas</th></tr></thead>
                 <tbody>{suppliers.data.map((s) => (
                   <tr key={s.id} className="click" onClick={() => setEditingSup(s)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setEditingSup(s)}>
-                    <td><b>{s.name}</b>{!s.active && <div className="sub">Inactivo</div>}</td><td>{s.contact_name || '—'}</td><td>{phoneFmt(s.phone)}</td><td className="hide-sm muted">{s.notes}</td>
+                    <td><b>{s.name}</b>{!s.active && <div className="sub">Inactivo</div>}{s.contact_name && <div className="sub">{s.contact_name}</div>}</td><td>{s.website ? <a href={s.website} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Abrir tienda</a> : '—'}</td><td>{phoneFmt(s.phone)}</td><td className="hide-sm muted">{s.notes}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -148,13 +148,13 @@ function PurchaseForm({ purchase, onClose, onSaved }) {
 }
 
 function SupplierForm({ supplier, onClose, onSaved }) {
-  const [f, setF] = useState({ name: '', contact_name: '', phone: '', email: '', notes: '', active: true, ...(supplier || {}) })
+  const [f, setF] = useState({ name: '', contact_name: '', phone: '', email: '', website: '', notes: '', active: true, ...(supplier || {}) })
   const [err, setErr] = useState(null)
   const toast = useToast()
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
   const save = async () => {
     if (!f.name?.trim()) { setErr('Escribe el nombre.'); return }
-    const row = { name: f.name.trim(), contact_name: f.contact_name || null, phone: f.phone || null, email: f.email || null, notes: f.notes || null, active: f.active }
+    const row = { name: f.name.trim(), contact_name: f.contact_name || null, phone: f.phone || null, email: f.email || null, website: f.website?.trim() ? (/^https?:\/\//.test(f.website.trim()) ? f.website.trim() : `https://${f.website.trim()}`) : null, notes: f.notes || null, active: f.active }
     try {
       if (supplier) await q(supabase.from('suppliers').update(row).eq('id', supplier.id))
       else await q(supabase.from('suppliers').insert(row))
@@ -171,7 +171,8 @@ function SupplierForm({ supplier, onClose, onSaved }) {
         <Field label="Nombre" className="full"><input value={f.name} onChange={set('name')} autoFocus /></Field>
         <Field label="Contacto"><input value={f.contact_name || ''} onChange={set('contact_name')} /></Field>
         <Field label="Teléfono"><input type="tel" value={f.phone || ''} onChange={set('phone')} /></Field>
-        <Field label="Correo" className="full"><input type="email" value={f.email || ''} onChange={set('email')} /></Field>
+        <Field label="Correo"><input type="email" value={f.email || ''} onChange={set('email')} /></Field>
+        <Field label="Tienda en línea" hint="Liga para hacer pedidos; aparece en las alertas"><input type="url" value={f.website || ''} onChange={set('website')} placeholder="https://…" /></Field>
         <Field label="Notas" className="full"><textarea value={f.notes || ''} onChange={set('notes')} placeholder="Tiempos de entrega, mínimos de compra…" /></Field>
         <label className="check"><input type="checkbox" checked={f.active} onChange={set('active')} />Activo</label>
       </div>

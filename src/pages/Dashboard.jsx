@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { supabase, q } from '../lib/supabase'
 import { useLoad } from '../lib/hooks'
-import { money, pct, qty, relDay, today, waLink } from '../lib/format'
+import { money, pct, qty, relDay, shortDate, today, waLink } from '../lib/format'
 import { Empty, ErrorBox, Icon, Loading, PayStatus } from '../components/ui'
 import MonthChart from '../components/MonthChart'
 
@@ -56,7 +56,7 @@ export default function Dashboard() {
 
       <div className="panel" style={{ marginBottom: 16 }}>
         <div className="kpis">
-          <div><div className="v">{kpi.pending_deliveries}</div><div className="l">Entregas pendientes{kpi.overdue_deliveries > 0 && <>, <b style={{ color: 'var(--danger)' }}>{kpi.overdue_deliveries} atrasadas</b></>}</div></div>
+          <div><div className="v">{kpi.pending_deliveries}</div><div className="l">Entregas pendientes, próxima ruta {shortDate(kpi.next_delivery_date)}{kpi.overdue_deliveries > 0 && <>; <b style={{ color: 'var(--danger)' }}>{kpi.overdue_deliveries} atrasadas</b></>}</div></div>
           <div><div className="v">{money(kpi.unpaid_amount)}</div><div className="l">Por cobrar</div></div>
           <div><div className="v">{kpi.active_customers_90d}</div><div className="l">Clientes activos (90 días){kpi.new_customers_this_month > 0 && `, ${kpi.new_customers_this_month} nuevos`}</div></div>
           <div><div className="v">{money(kpi.subscription_mrr)}</div><div className="l">Ingreso mensual por suscripciones ({kpi.active_subscriptions} {kpi.active_subscriptions === 1 ? 'activa' : 'activas'})</div></div>
@@ -104,8 +104,16 @@ export default function Dashboard() {
             <ul className="list">
               {stock.map((s) => (
                 <li key={s.product_id}>
-                  <div><div style={{ fontWeight: 600 }}>{s.name}</div><div className="muted" style={{ fontSize: 13 }}>{s.supplier_name ? `Proveedor: ${s.supplier_name}` : 'Sin proveedor asignado'}</div></div>
-                  <div className="right"><div style={{ fontWeight: 600, color: 'var(--danger)' }}>{qty(s.on_hand)} {s.base_unit}</div><div className="muted" style={{ fontSize: 13 }}>mínimo {qty(s.reorder_point)}{s.reorder_qty ? `, pedir ${qty(s.reorder_qty)}` : ''}</div></div>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{s.name}</div>
+                    <div className="muted" style={{ fontSize: 13 }}>Comprar {qty(s.suggested_qty)} {s.base_unit}{s.supplier_name ? ` en ${s.supplier_name}` : ''}</div>
+                  </div>
+                  <div className="right">
+                    <div style={{ fontWeight: 600, color: 'var(--danger)' }}>Quedan {qty(s.projected)} {s.base_unit}</div>
+                    {s.supplier_website
+                      ? <a href={s.supplier_website} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>Abrir tienda</a>
+                      : <div className="muted" style={{ fontSize: 13 }}>alerta en {qty(s.alert_threshold)}</div>}
+                  </div>
                 </li>
               ))}
             </ul>

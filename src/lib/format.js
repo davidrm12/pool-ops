@@ -82,3 +82,23 @@ export const L = {
   movement: { purchase: 'Compra', sale: 'Venta', count: 'Conteo', waste: 'Merma', internal_use: 'Uso interno' },
 }
 export const options = (map) => Object.entries(map).map(([value, label]) => ({ value, label }))
+
+export const WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+export const longDate = (s) => {
+  const d = parseDate(s)
+  return d ? d.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }) : '—'
+}
+
+// Google Maps directions: one destination + up to 9 stops per link.
+// (Phone browsers cap it at 3 stops; the Maps app and computers take 9.)
+export const routeLinks = (stops) => {
+  const addrs = stops.map((s) => [s.address ?? s.delivery_address, s.zone, CITY].filter(Boolean).join(', '))
+    .filter((a) => a.split(',')[0].trim() && !a.startsWith(CITY))
+  const out = []
+  for (let i = 0; i < addrs.length; i += 10) {
+    const c = addrs.slice(i, i + 10)
+    const way = c.slice(0, -1).join('|')
+    out.push(`https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${encodeURIComponent(c[c.length - 1])}${way ? `&waypoints=${encodeURIComponent(way)}` : ''}`)
+  }
+  return out
+}

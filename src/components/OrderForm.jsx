@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase, q } from '../lib/supabase'
-import { loadCustomers, loadVariants, syncLines } from '../lib/data'
+import { loadCustomers, loadVariants, nextDeliveryOn, syncLines } from '../lib/data'
 import { L, money, options, phoneFmt, today } from '../lib/format'
 import { Combo, DeleteButton, ErrorBox, Field, Loading, Modal, Select, useToast } from './ui'
 import LinesEditor, { validLines } from './LinesEditor'
@@ -33,7 +33,8 @@ export default function OrderForm({ orderId, presetCustomer, onClose, onSaved })
           setF({ ...rest, delivery_date: rest.delivery_date || '', delivery_address: rest.delivery_address || '', notes: rest.notes || '' })
           setLines(order_items.sort((a, b) => a.id - b.id).map((i) => ({ ...i, key: i.id })))
         } else {
-          setF({ ...blank(), customer_id: presetCustomer || '' })
+          const next = await nextDeliveryOn(today()).catch(() => '')
+          setF({ ...blank(), customer_id: presetCustomer || '', delivery_date: next || '' })
           setLines([{ key: 1, variant_id: '', qty: 1, unit_price: '' }])
         }
       } catch (e) { setErr(e.message) }
@@ -97,7 +98,7 @@ export default function OrderForm({ orderId, presetCustomer, onClose, onSaved })
 
         <div className="form-grid">
           <Field label="Fecha del pedido"><input type="date" value={f.order_date} onChange={set('order_date')} /></Field>
-          <Field label="Fecha de entrega" hint="Vacío = el mismo día del pedido"><input type="date" value={f.delivery_date} onChange={set('delivery_date')} /></Field>
+          <Field label="Fecha de entrega" hint="Por defecto, el siguiente día de reparto. Cámbiala si es una excepción."><input type="date" value={f.delivery_date} onChange={set('delivery_date')} /></Field>
           <Field label="Dirección de entrega" className="full" hint="Déjala vacía para usar la dirección del cliente"><input value={f.delivery_address} onChange={set('delivery_address')} placeholder={cust?.address || ''} /></Field>
           <Field label="Estado"><Select value={f.status} onChange={set('status')} options={options(L.orderStatus)} /></Field>
           <Field label="Canal"><Select value={f.channel} onChange={set('channel')} options={options(L.channel)} /></Field>

@@ -16,7 +16,7 @@ export default function Inventory() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Inventario</h1><p>Existencias calculadas con compras, ventas y conteos. Valor total: <b>{money(total)}</b></p></div>
+        <div><h1>Inventario</h1><p>Existencias calculadas con compras, ventas y conteos. "Queda" descuenta las entregas de suscripción próximas. Valor total: <b>{money(total)}</b></p></div>
         <div className="actions">
           <button className="btn" onClick={() => setAction({ type: 'out' })}>Registrar merma o uso</button>
           <button className="btn primary" onClick={() => setAction({ type: 'count' })}>Registrar conteo físico</button>
@@ -30,15 +30,16 @@ export default function Inventory() {
             {stock.loading ? <Loading /> : !stock.data?.length ? <Empty text="Agrega productos y registra una compra o un conteo para ver existencias." /> : (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Producto</th><th className="num">Existencia</th><th className="num hide-sm">Valor</th><th className="num hide-sm">Vendido 30 días</th><th className="num">Alcanza para</th><th className="num hide-sm">Reorden</th><th /></tr></thead>
+                  <thead><tr><th>Producto</th><th className="num">Existencia</th><th className="num hide-sm">Suscripciones próximas</th><th className="num">Queda</th><th className="num hide-sm">Alerta en</th><th className="num hide-sm">Valor</th><th className="num hide-sm">Alcanza para</th><th /></tr></thead>
                   <tbody>{stock.data.map((s) => (
                     <tr key={s.product_id}>
-                      <td><b>{s.name}</b>{s.needs_reorder && <> <Badge cls="b-bad">Reabastecer</Badge></>}{s.supplier_name && <div className="sub">{s.supplier_name}</div>}</td>
-                      <td className="num" style={{ color: Number(s.on_hand) < 0 ? 'var(--danger)' : undefined }}><b>{qty(s.on_hand)}</b> {s.base_unit}</td>
+                      <td><b>{s.name}</b>{s.needs_reorder && <> <Badge cls="b-bad">Reabastecer</Badge></>}{s.supplier_name && <div className="sub">{s.supplier_website ? <a href={s.supplier_website} target="_blank" rel="noreferrer">{s.supplier_name}</a> : s.supplier_name}</div>}</td>
+                      <td className="num" style={{ color: Number(s.on_hand) < 0 ? 'var(--danger)' : undefined }}>{qty(s.on_hand)} {s.base_unit}</td>
+                      <td className="num hide-sm">{Number(s.committed_subscriptions) ? `−${qty(s.committed_subscriptions)}` : '—'}</td>
+                      <td className="num" style={{ color: s.needs_reorder ? 'var(--danger)' : undefined }}><b>{qty(s.projected)}</b> {s.base_unit}{s.needs_reorder && <div className="sub">comprar {qty(s.suggested_qty)}</div>}</td>
+                      <td className="num hide-sm">{s.alert_threshold != null ? `${qty(s.alert_threshold)} ${s.base_unit}` : <span className="muted">Sin presentaciones</span>}</td>
                       <td className="num hide-sm">{money(s.stock_value)}</td>
-                      <td className="num hide-sm">{qty(s.sold_last_30d)} {s.base_unit}</td>
-                      <td className="num">{s.days_of_stock != null ? `${qty(s.days_of_stock)} días` : '—'}</td>
-                      <td className="num hide-sm">{s.reorder_point != null ? `${qty(s.reorder_point)} ${s.base_unit}` : <span className="muted">Sin definir</span>}</td>
+                      <td className="num hide-sm">{s.days_of_stock != null ? `${qty(s.days_of_stock)} días` : '—'}</td>
                       <td className="right"><button className="btn sm" onClick={() => setAction({ type: 'count', product: s.product_id })}>Contar</button></td>
                     </tr>
                   ))}</tbody>
