@@ -3,6 +3,7 @@ import { supabase, q } from '../lib/supabase'
 import { useLoad } from '../lib/hooks'
 import { loadSuppliers, uploadProductImage } from '../lib/data'
 import { L, money, options, pct, qty } from '../lib/format'
+import BundlesPanel from './Bundles'
 import { Badge, DeleteButton, Empty, ErrorBox, Field, Icon, Loading, Modal, Select, Seg, useToast } from '../components/ui'
 
 const VGRID = 'minmax(0,2fr) 100px 100px 70px 50px 50px 36px'
@@ -23,9 +24,10 @@ export default function Products() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Productos</h1><p>Catálogo, presentaciones, precios y costos.</p></div>
+        <div><h1>Productos</h1><p>Paquetes, catálogo, presentaciones, precios y costos.</p></div>
         <button className="btn primary" onClick={() => setEditing({})}><Icon name="plus" />Nuevo producto</button>
       </div>
+      <BundlesPanel />
       <div className="toolbar"><Seg value={view} onChange={setView} options={[{ value: 'active', label: 'Activos' }, { value: 'inactive', label: 'Inactivos' }, { value: 'all', label: 'Todos' }]} /></div>
       <ErrorBox msg={error} />
       <div className="panel">

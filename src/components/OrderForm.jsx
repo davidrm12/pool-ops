@@ -98,6 +98,7 @@ export default function OrderForm({ orderId, presetCustomer, onClose, onSaved })
         </div>
 
         <LinesEditor lines={lines} setLines={setLines} variants={variants} />
+        {lines.some((l) => l.bundle_id) && <p className="muted" style={{ fontSize: 13.5, marginTop: -6 }}>Incluye un paquete: sus productos aparecen por separado y el ahorro del paquete está dentro del descuento ({money(f.bundle_discount)}).</p>}
 
         <div className="form-grid">
           <Field label="Fecha del pedido"><input type="date" value={f.order_date} onChange={set('order_date')} /></Field>

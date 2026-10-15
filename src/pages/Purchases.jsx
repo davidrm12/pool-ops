@@ -73,7 +73,7 @@ export default function Purchases() {
 
 function PurchaseForm({ purchase, onClose, onSaved }) {
   const [f, setF] = useState({ supplier_id: purchase?.supplier_id ?? '', purchase_date: purchase?.purchase_date ?? today(), shipping_cost: purchase?.shipping_cost ?? 0, invoice_ref: purchase?.invoice_ref ?? '', notes: purchase?.notes ?? '' })
-  const [items, setItems] = useState(purchase?.purchase_items ? [] : [{ key: 1, product_id: '', qty: '', unit_cost: '' }])
+  const [items, setItems] = useState(purchase?.purchase_items ? [] : [{ key: 1, product_id: '', qty: '', amount: '' }])
   const [products, setProducts] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [err, setErr] = useState(null)
@@ -81,15 +81,17 @@ function PurchaseForm({ purchase, onClose, onSaved }) {
   const toast = useToast()
   useEffect(() => {
     Promise.all([loadProducts(), loadSuppliers()]).then(([p, s]) => { setProducts(p); setSuppliers(s) })
-    if (purchase) q(supabase.from('purchase_items').select('*').eq('purchase_id', purchase.id).order('id')).then((r) => setItems(r.map((i) => ({ ...i, key: i.id }))))
+    if (purchase) q(supabase.from('purchase_items').select('*').eq('purchase_id', purchase.id).order('id')).then((r) => setItems(r.map((i) => ({ ...i, key: i.id, amount: String(Math.round(i.qty * i.unit_cost * 100) / 100) }))))
   }, [purchase])
   const set = (k) => (e) => setF({ ...f, [k]: e?.target ? e.target.value : e })
   const upd = (i, patch) => setItems(items.map((x, j) => (j === i ? { ...x, ...patch } : x)))
-  const good = items.filter((i) => i.product_id && Number(i.qty) > 0 && i.unit_cost !== '')
-  const total = good.reduce((s, i) => s + Number(i.qty) * Number(i.unit_cost), 0) + Number(f.shipping_cost || 0)
+  // You type what you paid for each line; the cost per kg / L / piece is calculated (rounded to cents).
+  const unitCost = (i) => (Number(i.qty) > 0 && i.amount !== '' ? Math.round((Number(i.amount) / Number(i.qty)) * 100) / 100 : null)
+  const good = items.filter((i) => i.product_id && Number(i.qty) > 0 && i.amount !== '' && Number(i.amount) >= 0)
+  const total = good.reduce((s, i) => s + Number(i.amount), 0) + Number(f.shipping_cost || 0)
 
   const save = async () => {
-    if (!good.length) { setErr('Agrega al menos un producto con cantidad y costo.'); return }
+    if (!good.length) { setErr('Agrega al menos un producto con cantidad e importe pagado.'); return }
     setBusy(true); setErr(null)
     const row = { supplier_id: f.supplier_id ? Number(f.supplier_id) : null, purchase_date: f.purchase_date, shipping_cost: Number(f.shipping_cost) || 0, invoice_ref: f.invoice_ref.trim() || null, notes: f.notes.trim() || null }
     try {
@@ -101,7 +103,7 @@ function PurchaseForm({ purchase, onClose, onSaved }) {
       const gone = old.filter((o) => !keep.has(o.id)).map((o) => o.id)
       if (gone.length) await q(supabase.from('purchase_items').delete().in('id', gone))
       for (const i of good) {
-        const r = { product_id: Number(i.product_id), qty: Number(i.qty), unit_cost: Number(i.unit_cost) }
+        const r = { product_id: Number(i.product_id), qty: Number(i.qty), unit_cost: unitCost(i) }
         if (i.id) await q(supabase.from('purchase_items').update(r).eq('id', i.id))
         else await q(supabase.from('purchase_items').insert({ ...r, purchase_id: id }))
       }
@@ -124,22 +126,22 @@ function PurchaseForm({ purchase, onClose, onSaved }) {
         <Field label="Factura / referencia"><input value={f.invoice_ref} onChange={set('invoice_ref')} /></Field>
       </div>
       <div className="lines">
-        <div className="line line-head"><div>Producto</div><div>Cantidad</div><div>Costo unitario</div><div className="tot">Importe</div><div /></div>
+        <div className="line line-head"><div>Producto</div><div>Cantidad</div><div>Importe pagado</div><div className="tot">Costo unitario</div><div /></div>
         {items.map((i, idx) => {
           const p = products.find((x) => String(x.id) === String(i.product_id))
           return (
             <div className="line" key={i.key ?? i.id}>
               <Combo value={i.product_id} onChange={(v) => upd(idx, { product_id: v })} options={prodOpts} placeholder="Producto…" aria-label="Producto" />
               <input type="number" min="0" step="any" value={i.qty} onChange={(e) => upd(idx, { qty: e.target.value })} placeholder={p ? p.base_unit : ''} aria-label="Cantidad" />
-              <input type="number" min="0" step="any" value={i.unit_cost} onChange={(e) => upd(idx, { unit_cost: e.target.value })} placeholder={p ? `$/${p.base_unit}` : ''} aria-label="Costo unitario" />
-              <div className="tot">{money2((Number(i.qty) || 0) * (Number(i.unit_cost) || 0))}</div>
+              <input type="number" min="0" step="any" value={i.amount} onChange={(e) => upd(idx, { amount: e.target.value })} placeholder="$" aria-label="Importe pagado" />
+              <div className="tot">{unitCost(i) != null ? `${money2(unitCost(i))}${p ? `/${p.base_unit}` : ''}` : '—'}</div>
               <button type="button" className="btn ghost sm" onClick={() => setItems(items.filter((_, j) => j !== idx))} aria-label="Quitar"><Icon name="x" /></button>
             </div>
           )
         })}
-        <div className="line" style={{ display: 'block' }}><button type="button" className="btn sm" onClick={() => setItems([...items, { key: Math.random(), product_id: '', qty: '', unit_cost: '' }])}><Icon name="plus" />Agregar producto</button></div>
+        <div className="line" style={{ display: 'block' }}><button type="button" className="btn sm" onClick={() => setItems([...items, { key: Math.random(), product_id: '', qty: '', amount: '' }])}><Icon name="plus" />Agregar producto</button></div>
       </div>
-      <p className="muted" style={{ fontSize: 13.5 }}>Captura el costo por kg, L o pieza (ej. saco de 50 kg a $2,450 → cantidad 50, costo 49).</p>
+      <p className="muted" style={{ fontSize: 13.5 }}>Captura la cantidad en kg, L o piezas y lo que pagaste por ese renglón; el costo unitario se calcula solo (ej. saco de 50 kg por $2,450 → cantidad 50, importe 2450 → $49/kg). El envío va aparte.</p>
       <Field label="Notas"><textarea value={f.notes} onChange={set('notes')} /></Field>
       <div className="totals"><span className="grand">Total</span><span className="grand right">{money2(total)}</span></div>
       <ErrorBox msg={err} />

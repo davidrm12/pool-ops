@@ -28,7 +28,7 @@ export default function OrderExtras({ order, total, onChanged }) {
   const unpaid = o.payment_status !== 'paid' && o.status !== 'cancelled'
   const showCharge = o.charge_status !== 'none' || (isCard && o.subscription_id)
   const link = store && o.public_token ? `${store}/#/pedido/${o.public_token}` : ''
-  if (!o.needs_review && !showCharge && !unpaid && !link) return null
+  if (!o.needs_review && !showCharge && !unpaid && !link && o.channel === 'manual') return null
 
   const run = async (action, ok) => {
     setBusy(action)
@@ -89,9 +89,10 @@ export default function OrderExtras({ order, total, onChanged }) {
         </div>
       )}
 
-      {(o.contact_email || o.delivery_postal_code || link || unpaid) && (
+      {(o.contact_email || o.delivery_postal_code || link || unpaid || o.channel !== 'manual') && (
         <div className="muted inline" style={{ fontSize: 13.5, flexWrap: 'wrap', gap: '4px 14px' }}>
           {!showCharge && unpaid && <button type="button" className="btn sm" disabled={!!busy} onClick={() => run('payment_link')}>{busy === 'payment_link' ? 'Creando…' : 'Enviar liga de pago con tarjeta'}</button>}
+          {o.order_date && <span>El cliente lo ve como <b>Pedido {o.order_date.slice(8, 10)}/{o.order_date.slice(5, 7)}/{o.order_date.slice(0, 4)}</b></span>}
           {o.contact_email && <span>Correo del pedido: {o.contact_email}</span>}
           {o.delivery_postal_code && <span>CP {o.delivery_postal_code}</span>}
           {link && <button type="button" className="btn sm ghost" onClick={() => copy(link, 'Liga del pedido')}>Copiar liga del cliente</button>}

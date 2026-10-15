@@ -88,3 +88,9 @@ export async function adminRecipients(db: SupabaseClient): Promise<string[]> {
   const { data } = await db.from('alert_recipients').select('email').eq('active', true)
   return (data ?? []).map((r: { email: string }) => r.email)
 }
+
+// What customers see as the order's name: "Pedido 15/10/2026". The internal #id stays for the admin.
+export const orderLabel = (d: string | null | undefined) => {
+  const [y, m, dd] = String(d ?? '').slice(0, 10).split('-')
+  return y && m && dd ? `Pedido ${dd}/${m}/${y}` : 'Pedido'
+}

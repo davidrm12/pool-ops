@@ -17,6 +17,10 @@ export async function loadCustomers() {
   return q(supabase.from('customers').select('id, name, phone, address, zone, status').order('name'))
 }
 
+export async function loadBundles() {
+  return q(supabase.from('bundles').select('*, bundle_items(variant_id, qty)').order('sort').order('name'))
+}
+
 export async function loadProducts() {
   return q(supabase.from('products').select('id, name, base_unit, unit_cost, active').order('name'))
 }
@@ -79,7 +83,7 @@ export async function getStoreUrl() {
 }
 
 // Shrinks a photo in the browser (max 1000 px, WebP) and uploads it to Storage → public URL.
-export async function uploadProductImage(file, productId) {
+export async function uploadProductImage(file, productId, prefix = 'p') {
   if (!file.type.startsWith('image/')) throw new Error('El archivo debe ser una imagen.')
   const bmp = await createImageBitmap(file)
   const scale = Math.min(1, 1000 / Math.max(bmp.width, bmp.height))
@@ -87,7 +91,7 @@ export async function uploadProductImage(file, productId) {
   c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale)
   c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
   const blob = await new Promise((res) => c.toBlob(res, 'image/webp', 0.85))
-  const path = `p${productId}-${Date.now()}.webp`
+  const path = `${prefix}${productId}-${Date.now()}.webp`
   const { error } = await supabase.storage.from('product-images').upload(path, blob, { contentType: 'image/webp', upsert: true })
   if (error) throw new Error(`No se pudo subir la foto: ${error.message}`)
   return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl

@@ -6,7 +6,7 @@ Admin site for the business. Vite + React, hosted on GitHub Pages, data in Supab
 cloro-admin/
 ├─ src/                    the site
 ├─ supabase/schema.sql     the whole database (run once in Supabase)
-├─ supabase/migrations/    the same schema split in 6 parts (005 = automations, 006 = store + payments)
+├─ supabase/migrations/    the same schema split in 7 parts (005 = automations, 006 = store + payments, 007 = bundles + per-item subscriptions)
 ├─ supabase/functions/     Edge Functions: reports, store, stripe-webhook, charges (+ _shared code)
 ├─ supabase/config.toml    marks the functions that check auth themselves
 ├─ supabase/schedule.sql   daily/weekly jobs (run once, after step 3)
@@ -16,7 +16,10 @@ cloro-admin/
 
 ## 1. Database (Supabase)
 1. Create a Supabase project. Open **SQL Editor**, paste `supabase/schema.sql`, and run it.
-   **Already ran 001–005 (you have): run only `supabase/migrations/006_store.sql`.** It adds the store, payments and the
+   **Already ran 001–006 (you have): run only `supabase/migrations/007_bundles.sql`.** Then redeploy the functions
+   (`supabase functions deploy reports store stripe-webhook charges --no-verify-jwt`) and push both sites.
+
+   Earlier note for 006: It adds the store, payments and the
    product-photo bucket, and doesn't touch existing data except to normalize phones to 10 digits. If any saved phone
    can't be normalized it shows a notice listing them; fix those in Directorio (new edits already require 10 digits).
 2. In the authentication settings, turn off new user sign-ups.
@@ -123,6 +126,22 @@ customers and cards, which belong to the account that created them. When their a
 - **Price changes:** subscribers get an email, and the new price applies only to deliveries at least 7 days after the change
   (Ajustes → Aviso de cambio de precio). Changing a price by more than 30% asks you to confirm.
 - **Refunds:** **Reembolsar** in the order refunds in full through Stripe and cancels the order.
+- **Subscribe per product:** in the cart each product has its own "Suscribirme" box, with one frequency for all of them.
+  The first order charges everything; later deliveries bring (and charge) only the subscribed ones. The subscription
+  discount applies only to subscribed items, also in the first order.
+- **Bundles (paquetes):** made in Productos → Paquetes with fixed contents and a fixed price (the form suggests 10% off and
+  shows the savings). They show first in the store, one-time or by subscription; subscribers get the subscription discount
+  on top. In orders they're stored as their component sizes, so stock, cost and margins keep working.
+- **Order names:** customers see "Pedido dd/mm/aaaa" (order date) in the store, emails, Stripe and the SPEI reference. The admin
+  keeps the internal number (#N) and shows the customer-facing name in the order detail.
+- **Nothing charged that won't be delivered:**
+  - Pausing, cancelling (button in Suscripciones) or deleting a subscription cancels its upcoming order if it hasn't been charged.
+    Skipping from the customer link cancels that order if it was already created. A charged order stays; refund it if needed.
+  - When the subscription order is created, anything without enough stock is left out of that delivery and its charge;
+    customer and admin get an email. If nothing is left, no order is created for that date.
+  - Deactivating a size, product or bundle removes it from every subscription (and from upcoming uncharged orders),
+    emails the customer, and pauses subscriptions left empty. Unticking "Suscr." only stops new subscriptions.
+- Prefer **Cancelar suscripción** over deleting: it keeps the history and the churn numbers.
 
 ## Security
 - The anon key ends up in the public site. That's expected and safe: the database rejects every request unless the user is logged in **and** listed in `admins`.
@@ -141,9 +160,9 @@ customers and cards, which belong to the account that created them. When their a
 | Pedidos | Create, edit and delete orders. Price and cost fill in from the catalog. Filters: open, unpaid, **Revisar** (web orders with different data, declined or held charges), delivered, month, search. Each order shows the card-charge panel (Reintentar cobro, Aprobar y cobrar, Enviar liga de pago, Reembolsar) and the customer's order link |
 | Directorio | Customers and prospects: contact info, address with references, order history, total spent, how often they order, expected next order, unpaid amount |
 | Suscripciones | Recurring orders every N weeks. Created automatically; a button creates due ones right away. Shows the saved card and copies the customer's self-service link |
-| Productos | Catalog with sizes, prices, margin per size, cost, optional restock quantity, supplier, photo, and what shows in the store (per product and per size, and which sizes allow subscription) |
+| Productos | Bundles (paquetes) on top; catalog with sizes, prices, margin per size, cost, optional restock quantity, supplier, photo, and what shows in the store (per product and per size, and which sizes allow subscription) |
 | Inventario | Stock, upcoming subscription deliveries, what remains, alert level, value, days left, physical counts, waste or internal use, movement history |
-| Compras | Restocking (adds stock and updates average cost) and suppliers |
+| Compras | Restocking: quantity and amount paid per line (cost per unit is calculated); adds stock and updates average cost. Suppliers |
 | Gastos | Operating expenses by category |
 | Finanzas | Monthly income statement by year, with CSV download, and sales/margin by product |
 | Ajustes | Store settings, SPEI data, charge limits, delivery days and lead time, email recipients, "send now" buttons, run history |
@@ -176,3 +195,8 @@ Step 4 (`supabase/tests/30_store.sql`, plus browser tests with a mock Stripe, Re
   next day, no retry for a stolen card, card update then successful charge, held charge → approve, refund, payment link
 - price change notice, self-service skip / pause / resume / cancel / frequency / change card
 - admin: review list, charge panel, price-change guard, photo upload, store settings
+
+October changes (`supabase/tests/40_bundles.sql` plus browser tests): bundle pricing and savings, mixed order with only some
+items subscribed (discount on those only), subscription orders at bundle price, skip cancelling the created order, sold-out
+bundle dropped from a delivery with emails, pause/cancel/delete cancelling the uncharged order and blocking its charge,
+deactivation removing items and bundles from subscriptions and pausing empty ones, purchases entered by total, bundle form.

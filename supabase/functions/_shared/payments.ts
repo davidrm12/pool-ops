@@ -1,7 +1,7 @@
 // Card payments: Checkout for on-session payments (first order, payment links,
 // card updates) and off-session charges of saved cards with DB-enforced limits.
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2'
-import { storeLink } from './common.ts'
+import { orderLabel, storeLink } from './common.ts'
 import { stripe, StripeError, toCents } from './stripe.ts'
 
 async function ensureStripeCustomer(db: SupabaseClient, customerId: number, email?: string | null): Promise<string> {
@@ -19,11 +19,12 @@ async function ensureStripeCustomer(db: SupabaseClient, customerId: number, emai
 // Checkout Session for paying an order now. Saves the card if the order belongs to a subscription.
 export async function orderCheckout(db: SupabaseClient, orderId: number): Promise<string> {
   const { data: o, error } = await db.from('orders')
-    .select('id, customer_id, status, payment_status, public_token, subscription_id, contact_email').eq('id', orderId).single()
+    .select('id, customer_id, status, payment_status, public_token, subscription_id, contact_email, order_date').eq('id', orderId).single()
   if (error) throw error
   if (o.status === 'cancelled') throw new Error('Este pedido está cancelado.')
   if (o.payment_status === 'paid') throw new Error('Este pedido ya está pagado.')
-  const { data: v } = await db.from('v_orders').select('total, items_summary').eq('id', orderId).single()
+  const { data: v } = await db.from('v_orders').select('total').eq('id', orderId).single()
+  const { data: summary } = await db.rpc('order_public_summary', { p_order: orderId })
   if (!v || Number(v.total) <= 0) throw new Error('El total del pedido no es válido.')
   const { data: st } = await db.from('settings').select('store_name').single()
   const customer = await ensureStripeCustomer(db, o.customer_id, o.contact_email)
@@ -35,14 +36,14 @@ export async function orderCheckout(db: SupabaseClient, orderId: number): Promis
       quantity: 1,
       price_data: {
         currency: 'mxn', unit_amount: toCents(v.total),
-        product_data: { name: `Pedido #${o.id} · ${st?.store_name ?? ''}`.trim(), description: String(v.items_summary ?? '').slice(0, 500) || undefined },
+        product_data: { name: `${orderLabel(o.order_date)} · ${st?.store_name ?? ''}`.trim(), description: String(summary ?? '').slice(0, 500) || undefined },
       },
     }],
     payment_method_types: ['card'],
     payment_intent_data: {
       metadata: { order_id: String(o.id), kind: 'checkout' },
       setup_future_usage: o.subscription_id ? 'off_session' : undefined,
-      description: `Pedido #${o.id}`,
+      description: orderLabel(o.order_date),
     },
     metadata: { kind: 'order', order_id: String(o.id) },
     success_url: storeLink(`/pedido/${o.public_token}?pago=ok`),
