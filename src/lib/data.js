@@ -59,3 +59,36 @@ export const describeSend = (r) => {
   const bad = (r?.results || []).filter((x) => !x.ok)
   return [ok.length ? `Enviado a ${ok.join(', ')}.` : '', bad.length ? `No se pudo enviar a ${bad.map((x) => x.email).join(', ')}.` : ''].filter(Boolean).join(' ')
 }
+
+// Card charges through the `charges` Edge Function: charge | approve | refund | payment_link.
+export async function chargeAction(action, orderId) {
+  const { data, error } = await supabase.functions.invoke('charges', { body: { action, order_id: orderId } })
+  if (error) {
+    let b = null
+    try { b = await error.context.json() } catch { /* not JSON */ }
+    throw new Error(b?.error || error.message)
+  }
+  return data
+}
+
+// Public store base URL (Ajustes → Tienda), for links to customer pages.
+let storeUrl
+export async function getStoreUrl() {
+  if (storeUrl === undefined) storeUrl = (await q(supabase.from('settings').select('store_url').single())).store_url || ''
+  return storeUrl.replace(/\/+$/, '')
+}
+
+// Shrinks a photo in the browser (max 1000 px, WebP) and uploads it to Storage → public URL.
+export async function uploadProductImage(file, productId) {
+  if (!file.type.startsWith('image/')) throw new Error('El archivo debe ser una imagen.')
+  const bmp = await createImageBitmap(file)
+  const scale = Math.min(1, 1000 / Math.max(bmp.width, bmp.height))
+  const c = document.createElement('canvas')
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale)
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+  const blob = await new Promise((res) => c.toBlob(res, 'image/webp', 0.85))
+  const path = `p${productId}-${Date.now()}.webp`
+  const { error } = await supabase.storage.from('product-images').upload(path, blob, { contentType: 'image/webp', upsert: true })
+  if (error) throw new Error(`No se pudo subir la foto: ${error.message}`)
+  return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
+}

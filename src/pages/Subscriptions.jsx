@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, q } from '../lib/supabase'
 import { useLoad } from '../lib/hooks'
-import { loadCustomers, loadVariants } from '../lib/data'
+import { getStoreUrl, loadCustomers, loadVariants } from '../lib/data'
 import { L, date, money, options, parseDate, phoneFmt, relDay, today } from '../lib/format'
 import { Badge, Combo, DeleteButton, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, Select, statusClass, useToast } from '../components/ui'
 import LinesEditor, { validLines } from '../components/LinesEditor'
@@ -64,7 +64,7 @@ export default function Subscriptions() {
           </div>
         )}
       </div>
-      <p className="muted" style={{ marginTop: 12, fontSize: 13.5 }}>Los pedidos de suscripción se crean solos cada mañana, unos días antes de la entrega (ver Automatizaciones). El botón de arriba los crea en el momento si hace falta.</p>
+      <p className="muted" style={{ marginTop: 12, fontSize: 13.5 }}>Los pedidos de suscripción se crean solos cada mañana, unos días antes de la entrega (ver Ajustes). El botón de arriba los crea en el momento si hace falta.</p>
       {editing && <SubForm sub={editing.id ? editing : null} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload() }} />}
     </>
   )
@@ -77,9 +77,12 @@ function SubForm({ sub, onClose, onSaved }) {
   const [variants, setVariants] = useState([])
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [extra, setExtra] = useState(null)     // card, self-service link, source (not in the list view)
   const toast = useToast()
   useEffect(() => {
     Promise.all([loadCustomers(), loadVariants()]).then(([c, v]) => { setCustomers(c); setVariants(v) })
+    if (sub) Promise.all([q(supabase.from('subscriptions').select('source, card_brand, card_last4, stripe_payment_method_id, manage_token, delivery_postal_code, consent_at, last_charged_amount').eq('id', sub.id).single()), getStoreUrl()])
+      .then(([x, store]) => setExtra({ ...x, link: store ? `${store}/#/suscripcion/${x.manage_token}` : '' })).catch(() => {})
     if (sub) q(supabase.from('subscription_items').select('*').eq('subscription_id', sub.id)).then((r) => setLines(r.map((i) => ({ ...i, id: i.variant_id, key: i.variant_id }))))
     else setLines([{ key: 1, variant_id: '', qty: 1 }])
   }, [sub])
@@ -122,7 +125,25 @@ function SubForm({ sub, onClose, onSaved }) {
         <Field label="Dirección de entrega" className="full" hint="Vacía = dirección del cliente"><input value={f.delivery_address} onChange={set('delivery_address')} /></Field>
         <Field label="Notas" className="full"><textarea value={f.notes} onChange={set('notes')} /></Field>
       </div>
-      {sub?.started_on && <p className="muted" style={{ fontSize: 13.5 }}>Activa desde {date(sub.started_on)}.</p>}
+      {extra && (
+        <div className="muted stack" style={{ fontSize: 13.5, gap: 4 }}>
+          <div>
+            {extra.source === 'web' ? 'Creada por el cliente en la tienda' : 'Creada en la administración'}
+            {sub?.started_on && `, activa desde ${date(sub.started_on)}`}.
+            {extra.delivery_postal_code && ` Se entrega en CP ${extra.delivery_postal_code}.`}
+          </div>
+          <div>
+            {extra.card_last4 ? `Tarjeta guardada: ${(extra.card_brand || '').toUpperCase()} terminación ${extra.card_last4}. Se cobra sola cada entrega${extra.last_charged_amount ? ` (último cobro ${money(extra.last_charged_amount)})` : ''}.`
+              : f.payment_method === 'card' ? 'Sin tarjeta guardada: el cliente debe agregarla desde su liga, o se cobra con liga de pago en cada pedido.' : null}
+          </div>
+          {extra.link && (
+            <div className="inline">
+              <span>Liga para que el cliente salte, pause, cancele o cambie su tarjeta:</span>
+              <button type="button" className="btn sm" onClick={async () => { try { await navigator.clipboard.writeText(extra.link); toast('Liga copiada') } catch { toast(extra.link) } }}>Copiar liga</button>
+            </div>
+          )}
+        </div>
+      )}
       <ErrorBox msg={err} />
     </Modal>
   )

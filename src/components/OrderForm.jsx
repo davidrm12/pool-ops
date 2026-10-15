@@ -5,6 +5,7 @@ import { L, money, options, phoneFmt, today } from '../lib/format'
 import { Combo, DeleteButton, ErrorBox, Field, Loading, Modal, Select, useToast } from './ui'
 import LinesEditor, { validLines } from './LinesEditor'
 import CustomerForm from './CustomerForm'
+import OrderExtras from './OrderExtras'
 
 const blank = () => ({
   customer_id: '', order_date: today(), delivery_date: '', delivery_address: '', channel: 'manual', status: 'pending',
@@ -20,6 +21,7 @@ export default function OrderForm({ orderId, presetCustomer, onClose, onSaved })
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
   const [newCustomer, setNewCustomer] = useState(false)
+  const [ver, setVer] = useState(0)
   const toast = useToast()
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export default function OrderForm({ orderId, presetCustomer, onClose, onSaved })
         }
       } catch (e) { setErr(e.message) }
     })()
-  }, [orderId, presetCustomer])
+  }, [orderId, presetCustomer, ver])
 
   if (!f) return <Modal title="Pedido" onClose={onClose}>{err ? <ErrorBox msg={err} /> : <Loading />}</Modal>
 
@@ -81,6 +83,7 @@ export default function OrderForm({ orderId, presetCustomer, onClose, onSaved })
           <div>{orderId && <DeleteButton onConfirm={remove} label="Eliminar pedido" />}</div>
           <div className="actions"><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={save} disabled={busy}>{orderId ? 'Guardar cambios' : 'Registrar pedido'}</button></div>
         </>}>
+        {orderId && <OrderExtras order={f} total={total} onChanged={() => setVer((v) => v + 1)} />}
         <div className="form-grid">
           <Field label="Cliente" className="full">
             <div className="inline">

@@ -1,0 +1,13 @@
+# Edge Functions that authenticate requests themselves (scheduler secret,
+# admin login, Stripe signature or public store with Turnstile).
+[functions.reports]
+verify_jwt = false
+
+[functions.store]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.charges]
+verify_jwt = false

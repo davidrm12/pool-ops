@@ -13,6 +13,8 @@ const JOBS = {
   reorder_email: 'Correo: reabastecer',
   weekly_email: 'Correo: resumen semanal',
   daily: 'Tarea diaria',
+  charges: 'Cobros con tarjeta',
+  outbox: 'Correos a clientes',
 }
 
 function describeRun(r) {
@@ -21,6 +23,8 @@ function describeRun(r) {
   if (r.job === 'subscriptions') return d.orders_created ? `${d.orders_created} pedido(s) creados` : 'Nada que crear'
   if (r.job === 'reorder_check') return d.new_alerts ? `${d.new_alerts} producto(s) nuevos por reabastecer` : 'Sin alertas nuevas'
   if (r.job === 'route_requested') return `Ruta del ${longDate(d.date)}`
+  if (r.job === 'charges') return d.attempted ? `${d.charged} cobrado(s), ${d.failed} rechazado(s), ${d.held} retenido(s)` : 'Nada que cobrar'
+  if (r.job === 'outbox') return `${d.sent} correo(s)${d.failed ? `, ${d.failed} con error` : ''}`
   if (d.skipped) return d.skipped
   if (d.results) {
     const ok = d.results.filter((x) => x.ok).map((x) => x.email)
@@ -73,8 +77,10 @@ export default function Automations() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Automatizaciones</h1><p>Lo que el sistema hace solo, cuándo lo hace y a quién le avisa.</p></div>
+        <div><h1>Ajustes</h1><p>Tienda en línea, cobros, calendario de reparto y lo que el sistema hace solo.</p></div>
       </div>
+
+      {f && <StoreSettings initial={st.data} onSaved={st.reload} />}
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <section className="panel">
@@ -111,7 +117,7 @@ export default function Automations() {
         <section className="panel">
           <div className="panel-head"><h2>Qué corre y cuándo</h2></div>
           <ul className="list">
-            <li><div><b>Todos los días, 7:00 a.m.</b><div className="muted" style={{ fontSize: 13.5 }}>Crea los pedidos de suscripción que se entregan dentro de {f?.lead_days ?? '…'} días y revisa el inventario. Si un producto queda bajo, manda un correo (una sola vez hasta que se reabastezca).</div></div></li>
+            <li><div><b>Todos los días, 7:00 a.m.</b><div className="muted" style={{ fontSize: 13.5 }}>Crea los pedidos de suscripción que se entregan dentro de {f?.lead_days ?? '…'} días y cobra los que se pagan con tarjeta guardada (un reintento al día siguiente si el banco lo rechaza). Luego revisa el inventario. Si un producto queda bajo, manda un correo (una sola vez hasta que se reabastezca).</div></div></li>
             <li><div><b>{routeDays ? routeDays[0].toUpperCase() + routeDays.slice(1) : '…'}, 7:00 a.m.</b><div className="muted" style={{ fontSize: 13.5 }}>Manda la hoja de ruta del {days || '…'}: qué cargar, paradas por zona, cuánto cobrar y si falta inventario.</div></div></li>
             <li><div><b>Lunes, 7:05 a.m.</b><div className="muted" style={{ fontSize: 13.5 }}>Resumen de la semana anterior: ventas, utilidad, entregas sin cobrar, clientes atrasados y productos por reabastecer.</div></div></li>
           </ul>
@@ -171,5 +177,78 @@ export default function Automations() {
         )}
       </section>
     </>
+  )
+}
+
+// ---------- Store and card-charge settings ----------
+const STORE_FIELDS = ['store_name', 'store_open', 'store_closed_message', 'store_url', 'store_whatsapp', 'sub_discount_pct', 'delivery_fee',
+  'free_delivery_zips', 'bank_name', 'bank_clabe', 'bank_beneficiary', 'max_auto_charge', 'auto_charge_ratio', 'daily_auto_charge_cap', 'price_notice_days']
+
+function StoreSettings({ initial, onSaved }) {
+  const toast = useToast()
+  const [f, setF] = useState(() => Object.fromEntries(STORE_FIELDS.map((k) => [k, k === 'free_delivery_zips' ? (initial[k] || []).join(', ') : initial[k] ?? ''])))
+  const [busy, setBusy] = useState(false)
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
+  const digits = (v) => String(v || '').replace(/\D/g, '')
+
+  const save = async () => {
+    const zips = String(f.free_delivery_zips).split(/[\s,]+/).filter(Boolean)
+    if (zips.some((z) => !/^\d{5}$/.test(z))) { toast('Los códigos postales sin envío deben ser de 5 dígitos, separados por coma.', true); return }
+    if (f.store_whatsapp && digits(f.store_whatsapp).length !== 10) { toast('El WhatsApp de la tienda debe tener 10 dígitos.', true); return }
+    if (f.bank_clabe && digits(f.bank_clabe).length !== 18) { toast('La CLABE tiene 18 dígitos.', true); return }
+    setBusy(true)
+    const n = (v) => (v === '' ? null : Number(v))
+    try {
+      await q(supabase.from('settings').update({
+        store_name: f.store_name.trim() || 'Cloro a Domicilio', store_open: f.store_open, store_closed_message: f.store_closed_message.trim() || null,
+        store_url: f.store_url.trim().replace(/\/+$/, '') || null, store_whatsapp: digits(f.store_whatsapp) || null,
+        sub_discount_pct: n(f.sub_discount_pct) ?? 0, delivery_fee: n(f.delivery_fee) ?? 0, free_delivery_zips: zips,
+        bank_name: f.bank_name.trim() || null, bank_clabe: digits(f.bank_clabe) || null, bank_beneficiary: f.bank_beneficiary.trim() || null,
+        max_auto_charge: n(f.max_auto_charge), auto_charge_ratio: n(f.auto_charge_ratio), daily_auto_charge_cap: n(f.daily_auto_charge_cap),
+        price_notice_days: n(f.price_notice_days) ?? 7,
+      }).eq('id', true))
+      toast('Ajustes de la tienda guardados'); onSaved()
+    } catch (e) { toast(e.message, true) }
+    setBusy(false)
+  }
+
+  return (
+    <div className="grid grid-2" style={{ marginBottom: 16 }}>
+      <section className="panel">
+        <div className="panel-head"><h2>Tienda en línea</h2>{f.store_url && <a className="btn sm ghost" href={f.store_url} target="_blank" rel="noreferrer">Abrir tienda</a>}</div>
+        <div className="panel-body stack" style={{ gap: 14 }}>
+          <label className="check"><input type="checkbox" checked={f.store_open} onChange={set('store_open')} />Recibiendo pedidos</label>
+          {!f.store_open && <Field label="Mensaje mientras está cerrada"><input value={f.store_closed_message} onChange={set('store_closed_message')} placeholder="Volvemos el lunes…" /></Field>}
+          <div className="form-grid">
+            <Field label="Nombre de la tienda"><input value={f.store_name} onChange={set('store_name')} /></Field>
+            <Field label="WhatsApp de la tienda" hint="10 dígitos; aparece en la tienda y los correos"><input inputMode="tel" value={f.store_whatsapp} onChange={set('store_whatsapp')} /></Field>
+            <Field label="Dirección de la tienda" className="full" hint="Para las ligas en correos y en la administración"><input value={f.store_url} onChange={set('store_url')} placeholder="https://tudominio.mx" /></Field>
+            <Field label="Envío ($)"><input type="number" min="0" step="any" value={f.delivery_fee} onChange={set('delivery_fee')} /></Field>
+            <Field label="CP con envío gratis" hint="Separados por coma"><input value={f.free_delivery_zips} onChange={set('free_delivery_zips')} /></Field>
+            <Field label="Descuento de suscripción (%)"><input type="number" min="0" max="50" step="any" value={f.sub_discount_pct} onChange={set('sub_discount_pct')} /></Field>
+            <Field label="Aviso de cambio de precio (días)" hint="A suscriptores, antes de que aplique"><input type="number" min="0" max="60" value={f.price_notice_days} onChange={set('price_notice_days')} /></Field>
+          </div>
+          <div style={{ fontWeight: 600 }}>Datos para transferencia SPEI</div>
+          <div className="form-grid">
+            <Field label="Banco"><input value={f.bank_name} onChange={set('bank_name')} /></Field>
+            <Field label="CLABE"><input inputMode="numeric" value={f.bank_clabe} onChange={set('bank_clabe')} /></Field>
+            <Field label="Beneficiario" className="full"><input value={f.bank_beneficiary} onChange={set('bank_beneficiary')} /></Field>
+          </div>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><h2>Límites de cobro automático</h2></div>
+        <div className="panel-body stack" style={{ gap: 14 }}>
+          <p className="muted" style={{ margin: 0, fontSize: 13.5 }}>Protegen las tarjetas guardadas. Un cobro que rebase cualquiera de estos límites no se hace: queda retenido y te llega un correo para revisarlo y aprobarlo en el pedido.</p>
+          <div className="form-grid">
+            <Field label="Máximo por cobro ($)"><input type="number" min="0" step="any" value={f.max_auto_charge} onChange={set('max_auto_charge')} /></Field>
+            <Field label="Máximo vs. último cobro (veces)" hint="1.5 = hasta 50% más que la vez pasada"><input type="number" min="1" step="0.1" value={f.auto_charge_ratio} onChange={set('auto_charge_ratio')} /></Field>
+            <Field label="Máximo por día, todos los clientes ($)"><input type="number" min="0" step="any" value={f.daily_auto_charge_cap} onChange={set('daily_auto_charge_cap')} /></Field>
+          </div>
+          <p className="muted" style={{ margin: 0, fontSize: 13.5 }}>El monto siempre lo calcula la base de datos con los precios del catálogo; nadie lo escribe a mano. Si cambias un precio más de 30%, la administración te pide confirmarlo.</p>
+          <div><button className="btn primary" onClick={save} disabled={busy}>Guardar tienda y cobros</button></div>
+        </div>
+      </section>
+    </div>
   )
 }

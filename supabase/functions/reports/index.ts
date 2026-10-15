@@ -4,57 +4,17 @@
 // Called by:
 //   · the scheduler (pg_cron → pg_net) with header  x-cron-secret: <CRON_SECRET>
 //   · the admin site ("Enviar ahora") with the logged-in admin's session
-// Body: { kind: 'route' | 'reorder' | 'weekly', date?: 'YYYY-MM-DD', product_ids?: number[] }
+// Body: { kind: 'route' | 'reorder' | 'weekly' | 'outbox', date?: 'YYYY-MM-DD', product_ids?: number[] }
 //
 // Secrets (Edge Functions → Secrets): RESEND_API_KEY, CRON_SECRET
 // Optional: MAIL_FROM (default "Cloro <onboarding@resend.dev>"), SITE_URL, CITY
 // SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY are provided by Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { C, CITY, PAY, SUPABASE_URL as URL_, btn, cors, day, env, esc, json, money, num, row, section, shell, table, waLink } from '../_shared/common.ts'
+import { processOutbox } from '../_shared/outbox.ts'
 
-const env = (k: string, d = '') => Deno.env.get(k) ?? d
-const URL_ = env('SUPABASE_URL')
-const CITY = env('CITY', 'Torreón, Coahuila')
-const SITE = env('SITE_URL')
-const FROM = env('MAIL_FROM', 'Cloro <onboarding@resend.dev>')
 const RESEND = env('RESEND_API_URL', 'https://api.resend.com/emails')
-
-const cors = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-}
-const json = (o: unknown, status = 200) =>
-  new Response(JSON.stringify(o), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
-
-// ---------- formatting ----------
-const mxn = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })
-const money = (v: unknown) => mxn.format(Number(v ?? 0))
-const num = (v: unknown) => new Intl.NumberFormat('es-MX', { maximumFractionDigits: 2 }).format(Number(v ?? 0))
-const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
-const day = (s: string, opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' }) => {
-  const [y, m, d] = s.slice(0, 10).split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('es-MX', { timeZone: 'UTC', ...opts })
-}
-const PAY: Record<string, string> = { card: 'Tarjeta', cash: 'Efectivo', spei: 'SPEI' }
-const waLink = (p: string) => { const d = String(p || '').replace(/\D/g, ''); return d.length >= 10 ? `https://wa.me/${d.length === 10 ? '52' + d : d}` : '' }
-
-const C = { ink: '#12263A', muted: '#6E7E8E', line: '#D9E3E6', tile: '#E4F1F3', water: '#00798A', warn: '#FCF0C6', bad: '#B3412E' }
-const shell = (title: string, sub: string, body: string) => `<!doctype html><html><body style="margin:0;background:#F3F7F8;font-family:Arial,Helvetica,sans-serif;color:${C.ink}">
-<div style="max-width:640px;margin:0 auto;padding:20px 14px">
-  <div style="background:${C.ink};color:#fff;border-radius:10px;padding:18px 20px">
-    <div style="font-size:20px;font-weight:bold">${esc(title)}</div>
-    <div style="color:#A9C0CB;font-size:14px;margin-top:4px">${esc(sub)}</div>
-  </div>
-  ${body}
-  <p style="color:${C.muted};font-size:12px;margin-top:20px">Correo automático de Cloro${SITE ? ` · <a href="${esc(SITE)}" style="color:${C.water}">Abrir administración</a>` : ''}</p>
-</div></body></html>`
-const section = (title: string, inner: string) =>
-  `<div style="background:#fff;border:1px solid ${C.line};border-radius:10px;margin-top:14px"><div style="padding:12px 16px;border-bottom:1px solid ${C.line};font-weight:bold">${esc(title)}</div><div style="padding:4px 16px 12px">${inner}</div></div>`
-const row = (l: string, r: string, strong = false) =>
-  `<tr><td style="padding:7px 0;border-bottom:1px solid ${C.line}">${l}</td><td style="padding:7px 0;border-bottom:1px solid ${C.line};text-align:right;${strong ? 'font-weight:bold' : ''}">${r}</td></tr>`
-const table = (rows: string) => `<table style="width:100%;border-collapse:collapse;font-size:14px">${rows}</table>`
-const btn = (href: string, label: string) =>
-  `<a href="${esc(href)}" style="display:inline-block;background:${C.water};color:#fff;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:14px;margin:4px 6px 0 0">${esc(label)}</a>`
+const FROM = env('MAIL_FROM', 'Cloro <onboarding@resend.dev>')
 
 // Google Maps directions: 1 destination + up to 9 stops per link (computers / Maps app).
 function mapsLinks(stops: any[]): string[] {
@@ -145,6 +105,10 @@ Deno.serve(async (req) => {
 
   try {
     let mail: { subject: string; html: string } | null = null
+    if (kind === 'outbox') {
+      const sent = await processOutbox(db)
+      return json({ ok: true, sent: sent.length })
+    }
     if (kind === 'route') {
       const { data, error } = await db.rpc('route_sheet', { p_date: body.date ?? null })
       if (error) throw error

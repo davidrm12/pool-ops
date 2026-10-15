@@ -7,7 +7,7 @@ import MonthChart from '../components/MonthChart'
 
 export default function Dashboard() {
   const { data, error, loading } = useLoad(async () => {
-    const [kpi, pnl, deliveries, stock, overdue] = await Promise.all([
+    const [kpi, pnl, deliveries, stock, overdue, attention] = await Promise.all([
       q(supabase.from('v_dashboard').select('*').single()),
       q(supabase.from('v_pnl_monthly').select('*').order('month', { ascending: false }).limit(6)),
       q(supabase.from('v_pending_deliveries').select('*').limit(6)),
@@ -15,13 +15,18 @@ export default function Dashboard() {
       q(supabase.from('v_customer_summary').select('id, name, phone, last_order, days_overdue, median_gap_days')
         .eq('status', 'customer').eq('has_subscription', false).gt('days_overdue', 0)
         .order('days_overdue', { ascending: false }).limit(6)),
+      q(supabase.from('orders').select('id, needs_review, charge_status').neq('status', 'cancelled')
+        .or('needs_review.eq.true,charge_status.in.(failed,requires_approval)')),
     ])
-    return { kpi, pnl: pnl.reverse(), deliveries, stock, overdue }
+    return { kpi, pnl: pnl.reverse(), deliveries, stock, overdue, attention }
   })
 
   if (loading) return <Loading />
   if (error) return <ErrorBox msg={error} />
-  const { kpi, pnl, deliveries, stock, overdue } = data
+  const { kpi, pnl, deliveries, stock, overdue, attention } = data
+  const held = attention.filter((o) => o.charge_status === 'requires_approval').length
+  const failed = attention.filter((o) => o.charge_status === 'failed').length
+  const review = attention.filter((o) => o.needs_review).length
   const thisMonth = pnl.find((r) => r.month.slice(0, 7) === today().slice(0, 7))
   const delta = kpi.sales_last_month > 0 ? (kpi.sales_this_month || 0) / kpi.sales_last_month - 1 : null
   const monthName = new Date().toLocaleDateString('es-MX', { month: 'long' })
@@ -47,6 +52,13 @@ export default function Dashboard() {
           <div><div className="mid-num">{kpi.orders_this_month || 0}</div><div className="lbl">Pedidos del mes</div></div>
         </div>
       </section>
+
+      {attention.length > 0 && (
+        <div className="note" style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span>{[held && `${held} cobro${held > 1 ? 's' : ''} retenido${held > 1 ? 's' : ''} esperando tu aprobación`, failed && `${failed} cobro${failed > 1 ? 's' : ''} con tarjeta rechazado${failed > 1 ? 's' : ''}`, review && `${review} pedido${review > 1 ? 's' : ''} web con datos por revisar`].filter(Boolean).join(' · ')}</span>
+          <Link to="/pedidos?vista=revisar" className="btn sm">Revisar</Link>
+        </div>
+      )}
 
       {thisMonth?.sales_without_cost > 0 && (
         <div className="note" style={{ marginBottom: 16 }}>

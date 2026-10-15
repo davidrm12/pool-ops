@@ -248,3 +248,4 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--water); out
 .chart .tip i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
 .legend { display: flex; gap: 16px; font-size: 13px; color: var(--ink-2); flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+.line input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; padding: 0; justify-self: center; align-self: center; accent-color: var(--water, #0E7C86); }

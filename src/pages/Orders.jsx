@@ -5,17 +5,19 @@ import { useLoad } from '../lib/hooks'
 import { L, date, money } from '../lib/format'
 import { Empty, ErrorBox, Icon, Loading, OrderStatus, PayStatus, Seg } from '../components/ui'
 import OrderForm from '../components/OrderForm'
+import { ChargeBadge } from '../components/OrderExtras'
 
 const VIEWS = [
   { value: 'open', label: 'Abiertos' },
   { value: 'unpaid', label: 'Por cobrar' },
+  { value: 'review', label: 'Revisar' },
   { value: 'delivered', label: 'Entregados' },
   { value: 'all', label: 'Todos' },
 ]
 
 export default function Orders() {
   const [params, setParams] = useSearchParams()
-  const [view, setView] = useState('open')
+  const [view, setView] = useState(params.get('vista') === 'revisar' ? 'review' : 'open')
   const [search, setSearch] = useState('')
   const [month, setMonth] = useState('')
   const [editing, setEditing] = useState(params.get('nuevo') ? 'new' : null)
@@ -25,6 +27,7 @@ export default function Orders() {
     if (view === 'open') qry = qry.in('status', ['pending', 'confirmed', 'out_for_delivery'])
     if (view === 'unpaid') qry = qry.eq('payment_status', 'pending').neq('status', 'cancelled')
     if (view === 'delivered') qry = qry.eq('status', 'delivered')
+    if (view === 'review') qry = qry.or('needs_review.eq.true,charge_status.in.(failed,requires_approval)').neq('status', 'cancelled')
     if (month) {
       const [y, m] = month.split('-').map(Number)
       const end = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
@@ -66,11 +69,11 @@ export default function Orders() {
                   <tr key={o.id} className="click" onClick={() => setEditing(o.id)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setEditing(o.id)}>
                     <td className="muted">{o.id}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>{date(o.order_date)}{o.channel !== 'manual' && <div className="sub">{L.channel[o.channel]}</div>}</td>
-                    <td>{o.customer_name}</td>
+                    <td>{o.customer_name}{o.needs_review && <> <span className="badge b-warn">Revisar</span></>}</td>
                     <td className="hide-sm">{o.items_summary || <span className="muted">Sin productos</span>}</td>
                     <td className="num">{money(o.total)}</td>
                     <td><OrderStatus s={o.status} /></td>
-                    <td><PayStatus s={o.payment_status} /><div className="sub">{L.payMethod[o.payment_method]}</div></td>
+                    <td><PayStatus s={o.payment_status} /><div className="sub">{L.payMethod[o.payment_method]}</div>{['failed', 'requires_approval', 'refunded'].includes(o.charge_status) && <ChargeBadge s={o.charge_status} />}</td>
                   </tr>
                 ))}
               </tbody>
